@@ -1,0 +1,9 @@
+{
+	"name": "Hello",
+	"version": "0.1",
+	"hash": {
+		"source": "123",
+		"build": "123"
+	},
+	"limit": 1
+}
