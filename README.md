@@ -1,22 +1,26 @@
-# subsystem.io
-Tool and libs for easy deployment of robot subsytems.
-
-## Highly work in progress and still in research phase for best functionality.
-
 # Subsystem
 
 `subsystem.json` describes a subsystem.
-Most important are the 'requirements': currently running subsystems; and 'api' the RPC usable functions.
+SubSystem is used to manage connections to other SubSystems and the Manager.
 
-The subsystem 'Hello' for example will provide the RPC function, 'Hello.SayHello'.
+```go
+s := SubSystem.New()
 
-Alternatively, when building a subsystem that requires another, the Subsystem's API (Hello/api) can be required by Golang, so as to avoid guessing of correct inputs and outputs.
+s.Register("http://localhost:8080/v1")
+
+s.StartHeartbeat()
+``` 
+
+The SubSystem is registered, and then finally a continous 5-second heart beat with the server keeps it alive. HTTP or RPC servers can be used to keep the server alive if the HeartBeat is run concurrently.
 
 ## Example subsystem.json
 ```json
 {
 	"name": "Hello",
 	"version": "0.1",
+	"repository": {
+    	"url": "github.com/subsystemio/subsystem"
+  	},
 	"hash": {
 		"source": "123",
 		"build": "123"
