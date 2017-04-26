@@ -5,8 +5,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"time"
 
+	"fmt"
+
+	"github.com/gin-gonic/gin"
 	"github.com/subsystemio/shared"
 )
 
@@ -28,7 +30,7 @@ type APIData struct {
 	Write []string `json:"write"`
 }
 
-type Connection struct {
+type Manager struct {
 	URL string `json:"url"`
 }
 
@@ -44,18 +46,13 @@ type SubSystemData struct {
 	API          APIData            `json:"api"`
 	Requirements []RequirementsData `json:"requirements"`
 	Limit        int                `json:"limit"`
-	Connection   Connection         `json:"connection"`
+	Manager      Manager            `json:"manager"`
 }
 
 //SubSystem main structure.
 type SubSystem struct {
-	Data   SubSystemData
-	Health HealthCheck
-}
-
-type HealthCheck struct {
-	Name string `json:"name"`
-	Key  string `json:"key"`
+	Data SubSystemData
+	Port int
 }
 
 func (s *SubSystem) loadConfig() {
@@ -66,43 +63,35 @@ func (s *SubSystem) loadConfig() {
 	s.Data = d
 }
 
-func (s *SubSystem) Register(url string) {
+func (s *SubSystem) Register(url string) (int, error) {
 	res, err := http.Post(url+"/subsystems", "application/json; charset=utf-8", Shared.ToJSON(s.Data))
 	if err != nil {
-		log.Fatalf("Failed to register with Manager - %v", err)
+		log.Fatalf("Failed to register with Manager - %v\n", err)
 	}
 
-	body := Shared.ReadBody(res.Body)
+	log.Printf("Registered with Manager: %v\n", res.Body)
+	s.Port = 9000
 
-	if res.StatusCode == 500 {
-		log.Fatalf("Failed to register with Manager [%v] - %s", res.StatusCode, body)
-
-	}
-
-	log.Printf("Registered with Manager")
-
-	s.Data.Connection.URL = url
-
-	json.Unmarshal(body, &s.Health)
+	return 0, err
 }
 
-func (s *SubSystem) SendStatus() {
-	res, err := http.Post(s.Data.Connection.URL+"/health", "application/json; charset=utf-8", Shared.ToJSON(s.Health))
+func (s *SubSystem) HealthCheck() error {
+	url := fmt.Sprintf("http://localhost:%v/health", s.Port)
+	_, err := http.Head(url)
 	if err != nil {
-		log.Fatalf("Failed to check-in with Manager - %v", err)
+		log.Printf("Healthcheck failed. %v is no more.\n", s.Data.Name)
 	}
-	body := Shared.ReadBody(res.Body)
-	log.Printf("Ba-bump - %v", string(body))
+
+	return err
 }
 
-func (s *SubSystem) StartHeartbeat() {
-	ticker := time.NewTicker(5 * time.Second)
-	for {
-		select {
-		case <-ticker.C:
-			s.SendStatus()
-		}
-	}
+func (s *SubSystem) Serve() {
+	r := gin.Default()
+	r.HEAD("/health", func(c *gin.Context) {
+		c.String(200, "Alive")
+	})
+	url := fmt.Sprintf(":%v", s.Port)
+	r.Run(url)
 }
 
 func New() SubSystem {
