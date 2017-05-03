@@ -1,16 +1,17 @@
-package SubSystem
+package main
 
 import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
-	"net/http"
-
-	"fmt"
-
-	"github.com/gin-gonic/gin"
-	"github.com/subsystemio/shared"
+	"net"
+	"os/exec"
 )
+
+type Message struct {
+	Action string
+	Data   string
+}
 
 //HashData confirms build and source files
 type HashData struct {
@@ -18,27 +19,28 @@ type HashData struct {
 	Build  string `json:"build"`
 }
 
-//RequirementsData outlines required running subsystems.
+//RequirementsData outlines required running ssystems.
 type RequirementsData struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-//APIData describes inputs and outputs of subsystem.
+//APIData describes inputs and outputs of ssystem.
 type APIData struct {
 	Read  []string `json:"read"`
 	Write []string `json:"write"`
 }
 
 type Manager struct {
-	URL string `json:"url"`
+	URL        string `json:"url"`
+	Connection net.Conn
 }
 
 type Repository struct {
 	URL string `json:"url"`
 }
 
-type SubSystemData struct {
+type Body struct {
 	Name         string             `json:"name"`
 	Version      string             `json:"version"`
 	Repository   Repository         `json:"repository"`
@@ -49,62 +51,77 @@ type SubSystemData struct {
 	Manager      Manager            `json:"manager"`
 }
 
-//SubSystem main structure.
 type SubSystem struct {
-	Data SubSystemData
-	Port int
+	Token    string
+	Body     Body
+	Inbound  chan Message
+	Outbound chan Message
 }
 
-func (s *SubSystem) loadConfig() {
-	file, _ := ioutil.ReadFile("./subsystem.json")
-
-	d := SubSystemData{}
-	json.Unmarshal(file, &d)
-	s.Data = d
+func runCommand(args []string) {
+	cmd := exec.Command("cmd", args...)
+	cmd.Run()
 }
 
-func (s *SubSystem) Register(url string) (int, error) {
-	res, err := http.Post(url+"/subsystems", "application/json; charset=utf-8", Shared.ToJSON(s.Data))
-	if err != nil {
-		log.Fatalf("Failed to register with Manager - %v\n", err)
-	}
-
-	log.Printf("Registered with Manager: %v\n", res.Body)
-	s.Port = 9000
-
-	return 0, err
+func (s *SubSystem) Deploy(url string, name string) {
+	runCommand([]string{"/k", "go", "get", url})
+	go runCommand([]string{"/k", name})
 }
 
-func (s *SubSystem) HealthCheck() error {
-	url := fmt.Sprintf("http://localhost:%v/health", s.Port)
-	_, err := http.Head(url)
-	if err != nil {
-		log.Printf("Healthcheck failed. %v is no more.\n", s.Data.Name)
-	}
+func (s *SubSystem) Connect() error {
+	conn, err := net.Dial("tcp", s.Body.Manager.URL)
+
+	s.Body.Manager.Connection = conn
 
 	return err
 }
 
-func (s *SubSystem) Serve() {
-	r := gin.Default()
-	r.HEAD("/health", func(c *gin.Context) {
-		c.String(200, "Alive")
-	})
-	url := fmt.Sprintf(":%v", s.Port)
-	r.Run(url)
+func (s *SubSystem) Listen() {
+	enc := json.NewEncoder(s.Body.Manager.Connection)
+	enc.Encode(Message{Action: "Token", Data: "Test"})
+
+	go func() {
+		for {
+			select {
+			case msg := <-s.Outbound:
+				go func() {
+					log.Println(msg)
+					enc.Encode(Message{Action: msg.Action, Data: msg.Data})
+				}()
+			case msg := <-s.Inbound:
+				log.Println(msg)
+			}
+		}
+	}()
 }
 
-func New() SubSystem {
+func (s *SubSystem) loadConfig(url string) {
+	file, _ := ioutil.ReadFile("./subsystem.json")
+
+	d := Body{}
+	json.Unmarshal(file, &d)
+	d.Manager.URL = url
+	s.Body = d
+}
+
+func New(url string) *SubSystem {
 	s := new(SubSystem)
-	s.loadConfig()
+	s.loadConfig(url)
 
-	return *s
+	if err := s.Connect(); err != nil {
+		log.Fatalln("Failed to connect to Manager")
+	}
+
+	return s
 }
 
-func Parse(data []byte) SubSystem {
-	d := SubSystemData{}
-	json.Unmarshal(data, &d)
+func main() {
 
-	s := SubSystem{Data: d}
-	return s
+	s := New("localhost:8081")
+
+	enc := json.NewEncoder(s.Body.Manager.Connection)
+	enc.Encode(Message{Action: "Token", Data: "Test"})
+	s.Body.Manager.Connection.Close()
+
+	//enc.Encode(Message{Action: "Close"})
 }
